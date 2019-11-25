@@ -4,7 +4,7 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-		<title>reveal.js</title>
+		<title>Using C-Libraries in Rust</title>
 
 		<link rel="stylesheet" href="css/reset.css">
 		<link rel="stylesheet" href="css/reveal.css">
@@ -25,8 +25,210 @@
 	<body>
 		<div class="reveal">
 			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
+				<section>
+					<h1>Using C-Libraries in Rust</h1>
+					<h2>Andreas Monitzer</h2>
+					<p>El rust de vienna, 2019-11-26</p>
+				</section>
+				<section>
+					<h1>Overview</h1>
+					<ol>
+						<li>Why</li>
+						<li>Why Not</li>
+						<li>How</li>
+						<li>Oh My</li>
+					</ol>
+					<aside class="notes">
+						<ol>
+							<li>Why would you want to use C libs from Rust</li>
+							<li>Why should you avoid it if possible</li>
+							<li>How can you integrate a C library</li>
+							<li>Pitfalls</li>
+						</ol>
+					</aside>
+				</section>
+				<section>
+					<h1>Why</h1>
+					<ul>
+						<li>Ubuntu 19.04 library packages: 6555</li>
+						<li>existing codebase</li>
+					</ul>
+					<aside class="notes">
+						<p>[<a href="https://packages.ubuntu.com/disco/libs/">Ubuntu source</a>]</p>
+						<p>C library doesn't mean just stuff written in C. Every language has interop with C in some way.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>What's Different in Rust?</h1>
+					<ul>
+						<li>no C!</li>
+						<li>inlining</li>
+						<li>cargo &amp; build.rs</li>
+					</ul>
+					<aside class="notes">
+						<p>Unlike in C#, Java, JavaScript and many others, you don't have to write a single line of C for interop. Allows using structs, enums, unions, pointer math, everything.</p>
+						<p>link-time-optimization allows inlining across languages! (<a href="https://github.com/rust-lang/rust/pull/58057">pull request</a>)</p>
+						<p>Easy to integrate with build.rs, including downloading the library.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Why Not</h1>
+					<ul>
+						<li><code>unsafe</code></li>
+						<li>build library from source?</li>
+						<li>slow compilation</li>
+					</ul>
+					<aside class="notes">
+						<p>forced to write unsafe code, but the library code itself is also unsafe (as is everything in C)</p>
+						<p>need to integrate cargo with foreign build system somehow</p>
+						<p>So, if there's a usable Rust library, pick it over a C library!</p>
+					</aside>
+				</section>
+				<section>
+					<h1>How</h1>
+					<pre><code data-trim>
+						extern "C" {
+						    pub fn sqrt(x: f64) -> f64;
+						}
+						fn main() {
+						    println!("sqrt(2) = {}", unsafe { sqrt(2.0) });
+						}
+					</code></pre>
+					<aside class="notes">
+						<p>Data types are <em>not</em> converted! <code>f64</code> just happens to match <code>double</code> in C.</p>
+						<p>This is a bit of cheating, because the standard C library is currently always included in Rust.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Custom Libraries</h1>
+					<p>build.rs</p>
+					<pre><code data-trim>
+						fn main() {
+						    println!("cargo:rustc-link-lib=foo");
+						    println!("cargo:rustc-link-search=bar");
+						}
+					</code></pre>
+					<aside class="notes">
+						<p>Links libfoo.a/libfoo.so on Linux/macOS and foo.lib on Windows. The library search path <code>bar</code> to appended to the linker's list.</p>
+						<p>This also works when it's part of a library crate. cargo collects all of these dependencies and uses them to link the final binary.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Rust-Bindgen</h1>
+					<p><a href="https://rust-lang.github.io/rust-bindgen/">https://rust-lang.github.io/rust-bindgen/</a></p>
+					<p>Uses LLVM/clang to compile C code into Rust bindings.</p>
+					<p>Supports C and a parts of C++.</p>
+					<aside class="notes">
+						<p>Writing those definitions manually is cumbersome.</p>
+						<p>Since it's compiled, it resolves compile-time operations like preprocessor macros correctly!</p>
+						<p>C++: no stl, only some templates, no cross-language inheritance, no automatic calling of copy/move constructors, no exceptions</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Example</h1>
+					<pre><code data-trim>
+						typedef struct CoolStruct {
+							int x;
+							int y;
+						} CoolStruct;
+						
+						void cool_function(int i, char c, CoolStruct* cs);
+					</code></pre>
+					<pre><code data-trim>
+						#[repr(C)]
+						pub struct CoolStruct {
+						    pub x: ::std::os::raw::c_int,
+						    pub y: ::std::os::raw::c_int,
+						}
+						
+						extern "C" {
+						    pub fn cool_function(i: ::std::os::raw::c_int,
+						                         c: ::std::os::raw::c_char,
+						                         cs: *mut CoolStruct);
+						}
+					</code></pre>
+					<aside class="notes">
+						<p>Cool features: whitelisting, blacklisting, bitfields, different ways to represent enums, automatic unit tests</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Raw Pointers in Rust</h1>
+					<p><code>*mut Foo</code>: mutable pointer to type Foo</p>
+					<p><code>*const Bar</code>: constant pointer to type Bar</p>
+					<pre><code data-trim>
+						let foo = Foo {…};
+						let foo_ptr: *mut Foo = Box::into_raw(Box::new(foo));
+						let foo_ref: Option&lt;&Foo> = unsafe { foo.as_ref() };
+						let foo: Box&lt;Foo> = unsafe { Box::from_raw(foo_ptr) };
+					</code></pre>
+					<aside class="notes">
+						<p>Not C interop-specific, but important here.</p>
+						<p><code>as_ref</code> returns <code>None</code> when the pointer is <code>NULL</code>, but even otherwise it's not guaranteed to be valid.</p>
+						<p><code>Arc</code> also has <code>into_raw</code>/<code>from_raw</code></p>
+						<p>Converting stuff into pointers is safe!</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Callbacks</h1>
+					<pre><code data-trim>
+						#[repr(C)]
+						pub struct Foo {
+						    pub bar: ::std::option::Option&lt;
+						        unsafe extern "C" fn(self_: *mut Foo)
+						            -> ::std::os::raw::c_int,
+						    >,
+						}
+					</code></pre>
+					<pre><code data-trim>
+						extern "C" fn do_bar(self_: *mut Foo) {
+						    let foo = unsafe { Box::from_raw(self_) };
+						    // …
+						    Box::into_raw(foo);
+						}
+
+						let foo = Box::new(Foo {
+						    bar: Some(do_bar)
+						});
+					</code></pre>
+					<aside class="notes">
+						<p><code>#[repr(C)]</code> causes the struct to be formatted in the way a C compiler would do it (alignment and ordering). It's broken for enums though!</code></p>
+						<p>All pointers in C can be <code>NULL</code>, so all of them have to be <code>Option&lt;_></code></p>
+						<p>Rust-bindgen automatically renames all parameters called <code>self</code> to <code>self_</code> and <code>type</code> to <code>type_</code></p>
+						<p>This is not a Trait, so no way to capture environment here!</p>
+						<p>The <code>into_raw</code> avoids dropping the structure.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Build System</h1>
+					<p>build.rs</p>
+					<pre><code data-trim>
+						fn main() {
+						    let bindings = bindgen::builder()
+						        .header("wrapper.h")
+						        .whitelist_function("my_.*_function")
+						        .generate()
+						        .unwrap();
+						    bindings.write_to_file("./bindings.rs").unwrap();
+						}
+					</code></pre>
+					<aside class="notes">
+						<p>Also include bindgen in [build-dependencies]</p>
+						<p>All whitelist/blacklist parameters are regular expressions</p>
+						<p>For publication, it's better to not call this in the -sys crate itself, but commit the generated bindings file to the repository.</p>
+					</aside>
+				</section>
+				<section>
+					<h1>Oh My</h1>
+					<p>What C libraries do:</p>
+					<img src="pointerfun.svg" alt="Pointer Fun">
+					<p><a href="https://github.com/anlumo/cef/blob/1d737f69b6b03f7f14c649f265ebd52d6eba3828/src/refcounted.rs#L206">example solution</a></p>
+					<aside class="notes">
+						<p>Assume that you allocated this struct.</p>
+						<p>Assume that the library returns the pointer to the library data to the callback, but you want the user data.</p>
+						<p>Memory management? Allocation/deallocation</p>
+						<p>In Rust, you have to know the exact data type to drop a block of memory due to the different alignment requirements. You can't simply call <code>free</code> on a pointer like in C.</p>
+					</aside>
+				</section>
 			</div>
 		</div>
 
